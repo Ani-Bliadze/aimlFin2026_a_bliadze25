@@ -30,7 +30,7 @@ aimlFin2026_a_bliadze25/
 
 ## Tasks Overview
 
-### Task 1: Convolutional Neural Networks (10 points)
+### Task 1: Convolutional Neural Networks 
 - **File**: [task_1/conv_net.md](task_1/conv_net.md)
 - **Description**: Comprehensive description of CNNs (200+ words) with:
   - Architecture explanation and mathematical foundations
@@ -40,7 +40,7 @@ aimlFin2026_a_bliadze25/
   - Synthetic dataset generation and model training
   - Performance analysis and visualization
 
-### Task 2: Transformer Networks (10 points)
+### Task 2: Transformer Networks 
 - **File**: [task_2/transformer.md](task_2/transformer.md)
 - **Description**: Detailed explanation of transformers (200+ words) with:
   - Architecture components and mathematical formulations
@@ -50,7 +50,7 @@ aimlFin2026_a_bliadze25/
   - Multi-head attention pattern demonstration
   - Real-world cybersecurity use cases
 
-### Task 3: DDoS Attack Detection (20 points)
+### Task 3: DDoS Attack Detection 
 - **Files**: 
   - [task_3/ddos.md](task_3/ddos.md) - Main report
   - [task_3/ddos_analysis.py](task_3/ddos_analysis.py) - Analysis code
