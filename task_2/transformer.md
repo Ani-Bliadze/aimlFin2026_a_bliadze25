@@ -33,6 +33,16 @@ utf8
 
 ## Attention Mechanism Visualization
 
+### Included Visualizations
+
+#### 1) Attention layer mechanism
+
+![Self-attention heatmap](attention_heatmap.png)
+
+#### 2) Positional encoding
+
+![Positional encoding matrix](positional_encoding.png)
+
 ### Python Code
 
 ```python

@@ -2,22 +2,24 @@
 
 ## Executive Summary
 
-This report presents a comprehensive analysis of web server logs to identify DDoS (Distributed Denial of Service) attack time intervals using regression analysis and statistical methods.
+This report analyzes the provided web-server log and detects DDoS interval(s) using **regression analysis**.
 
-**Key Findings:**
-- **Primary DDoS Attack**: 2026-02-12 14:23:00 - 14:47:00 (24 minutes)
-- **Secondary Attack**: 2026-02-12 16:15:00 - 16:28:00 (13 minutes)
-- **Peak Request Rate**: 847 requests/minute (normal: ~45 req/min)
-- **Attack Characteristics**: 18.8x amplification, distributed IPs, uniform patterns
+**Key Findings (official dataset):**
+- **Detected DDoS interval (UTC):** 2024-03-22 14:51:00 to 14:53:00
+- **Detected DDoS interval (UTC+4):** 2024-03-22 18:51:00 to 18:53:00
+- **Duration:** 3 minutes
+- **Peak Request Rate:** 7884 requests/minute
 
 ---
 
 ## 1. Data Source
 
-**Log File**: [a_bliadze25_42198_server.log](a_bliadze25_42198_server.log)
+**Provided URL (required):** [https://max.ge/aiml_final/a_bliadze25_42198_server.log](https://max.ge/aiml_final/a_bliadze25_42198_server.log)
+
+**Uploaded Log File (same folder):** [a_bliadze25_42198_server.log](a_bliadze25_42198_server.log)
 
 **Server**: max.ge  
-**Analysis Period**: 2026-02-12 00:00:00 - 23:59:59  
+**Analysis Period**: 2024-03-22 18:00:00 - 19:00:00 (+04:00)  
 **Log Format**: Apache Combined Log Format
 
 ---
@@ -44,28 +46,22 @@ utf8
 
 ## 3. Analysis Results
 
-### 3.1 Normal Traffic Baseline
-- **Mean Request Rate**: 44.7 requests/minute
-- **Standard Deviation**: 12.3 requests/minute
-- **Typical Range**: 25-70 requests/minute
+### 3.1 Baseline Statistics
+- **Mean Request Rate**: 1043.28 requests/minute
+- **Peak Request Rate**: 7884 requests/minute
+- **Residual Sigma (baseline)**: 293.16
 
 ### 3.2 Identified DDoS Attack Intervals
 
-#### Primary Attack Window
-- **Start Time**: 2026-02-12 14:23:00
-- **End Time**: 2026-02-12 14:47:00
-- **Duration**: 24 minutes
-- **Peak Request Rate**: 847 requests/minute
-- **Total Requests**: 18,934
-- **Unique Source IPs**: 1,247 (distributed botnet)
-
-#### Secondary Attack Window
-- **Start Time**: 2026-02-12 16:15:00
-- **End Time**: 2026-02-12 16:28:00
-- **Duration**: 13 minutes
-- **Peak Request Rate**: 623 requests/minute
-- **Total Requests**: 7,821
-- **Unique Source IPs**: 892
+#### Detected Attack Window
+- **Start Time (UTC)**: 2024-03-22 14:51:00
+- **End Time (UTC)**: 2024-03-22 14:53:00
+- **Start Time (+04:00)**: 2024-03-22 18:51:00
+- **End Time (+04:00)**: 2024-03-22 18:53:00
+- **Duration**: 3 minutes
+- **Peak Request Rate**: 7884 requests/minute
+- **Total Requests in Attack Window**: 16,728
+- **Peak Unique Source IPs**: 214
 
 ---
 
@@ -143,9 +139,8 @@ The analysis generates:
 ## 7. Conclusions
 
 ### Attack Summary
-Two distinct DDoS attacks identified with high-confidence:
-1. **Primary** (14:23-14:47): High-intensity, 18.8x amplification
-2. **Secondary** (16:15-16:28): Medium-intensity follow-up
+One high-confidence DDoS interval is detected in the provided dataset:
+1. **18:51-18:53 (+04:00)** with a sharp regression-residual spike and a very high request burst.
 
 ### Technical Indicators
 - **Statistical Deviation**: Both attacks exceeded 3σ threshold
@@ -158,10 +153,8 @@ Two distinct DDoS attacks identified with high-confidence:
 3. CAPTCHA during high-traffic events
 4. CDN/DDoS protection services
 
-### Model Performance
-- **R Score**: 0.8734
-- **Detection Accuracy**: 100%
-- **False Positive Rate**: <1%
+### Model Note
+The method is regression-based anomaly detection (residual thresholding + high-traffic constraint), as required by the assignment.
 
 ---
 

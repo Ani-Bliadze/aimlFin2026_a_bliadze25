@@ -27,6 +27,20 @@ CNNs have revolutionized artificial intelligence since their breakthrough perfor
 - Performs final classification
 - Combines features from previous layers
 
+## Visualizations
+
+### 1) Synthetic malware image patterns
+
+![Synthetic malware samples](cnn_malware_samples.png)
+
+### 2) Convolution operation demo (input, kernel, feature map)
+
+![Convolution demo](cnn_convolution_demo.png)
+
+### 3) CNN training dynamics (accuracy curve)
+
+![Learning curve](cnn_learning_curve.png)
+
 ## Practical Application: Malware Detection in Cybersecurity
 
 ### Problem Statement

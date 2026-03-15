@@ -1,189 +1,202 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
+from __future__ import annotations
+
+import argparse
 import re
+from pathlib import Path
+from urllib.request import urlretrieve
 
-print("Generating server log with DDoS attacks...")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
 
-# Generate log file
-base_date = datetime(2026, 2, 12, 0, 0, 0)
-normal_ips = [f"192.168.{i}.{j}" for i in range(1, 10) for j in range(1, 50)]
-botnet_ips = [f"{i}.{j}.{k}.{l}" for i in range(50, 220, 15) 
-              for j in range(0, 255, 20) for k in range(0, 255, 25) 
-              for l in range(1, 255, 30)][:2000]
+LOG_URL = "https://max.ge/aiml_final/a_bliadze25_42198_server.log"
+LOCAL_LOG = Path("a_bliadze25_42198_server.log")
 
-urls = ['/index.html', '/about.html', '/api/data', '/products', '/login']
-user_agents = ['Mozilla/5.0', 'Python/3.9', 'curl/7.68.0']
+LOG_PATTERN = re.compile(
+    r'(?P<ip>[\d.]+) - - '
+    r'\[(?P<timestamp>[^\]]+)\] '
+    r'"(?P<method>\w+) (?P<url>[^\s]+) (?P<proto>HTTP/[^\"]+)" '
+    r'(?P<status>\d{3}) (?P<size>\d+) '
+    r'"(?P<referrer>[^\"]*)" "(?P<user_agent>[^\"]*)" (?P<response_time>\d+)'
+)
 
-log_entries = []
-for minute in range(1440):
-    current_time = base_date + timedelta(minutes=minute)
-    is_primary_attack = (14*60 + 23 <= minute <= 14*60 + 47)
-    is_secondary_attack = (16*60 + 15 <= minute <= 16*60 + 28)
-    
-    if is_primary_attack:
-        n_requests = np.random.randint(750, 900)
-        ips_pool = botnet_ips
-    elif is_secondary_attack:
-        n_requests = np.random.randint(550, 680)
-        ips_pool = botnet_ips
+
+def ensure_log_file(force_download: bool = False) -> Path:
+    if force_download or (not LOCAL_LOG.exists()):
+        print(f"Downloading dataset from: {LOG_URL}")
+        urlretrieve(LOG_URL, LOCAL_LOG)
+        print(f"Saved log file: {LOCAL_LOG.resolve()}")
     else:
-        hour = current_time.hour
-        base_requests = 50 if 9 <= hour <= 17 else 35 if 6 <= hour <= 22 else 20
-        n_requests = max(5, np.random.poisson(base_requests) + np.random.randint(-10, 15))
-        ips_pool = normal_ips
-    
-    for _ in range(n_requests):
-        second = np.random.randint(0, 60)
-        timestamp = current_time + timedelta(seconds=second)
-        ip = np.random.choice(ips_pool)
-        url = np.random.choice(urls)
-        status = 200 if np.random.random() > 0.02 else np.random.choice([404, 500])
-        size = np.random.randint(500, 5000)
-        user_agent = np.random.choice(user_agents)
-        timestamp_str = timestamp.strftime('%d/%b/%Y:%H:%M:%S +0000')
-        log_entries.append(f'{ip} - - [{timestamp_str}] "GET {url} HTTP/1.1" {status} {size} "-" "{user_agent}"')
+        print(f"Using existing log file: {LOCAL_LOG.resolve()}")
+    return LOCAL_LOG
 
-with open('a_bliadze25_42198_server.log', 'w') as f:
-    for entry in log_entries:
-        f.write(entry + '\n')
 
-print(f"Generated {len(log_entries)} log entries")
+def parse_log(path: Path) -> pd.DataFrame:
+    rows: list[dict[str, str]] = []
+    with path.open("r", encoding="utf-8", errors="ignore") as file:
+        for line in file:
+            match = LOG_PATTERN.match(line.strip())
+            if match:
+                rows.append(match.groupdict())
 
-# Parse log file
-print("\nParsing log file...")
-log_pattern = re.compile(r'(?P<ip>[\d.]+) - - \[(?P<timestamp>[^\]]+)\] "(?P<method>\w+) (?P<url>[^\s]+) HTTP/[^"]*" (?P<status>\d+) (?P<size>\d+)')
+    if not rows:
+        raise ValueError("No rows parsed from provided log file.")
 
-data = []
-with open('a_bliadze25_42198_server.log', 'r') as f:
-    for line in f:
-        match = log_pattern.match(line)
-        if match:
-            data.append(match.groupdict())
+    df = pd.DataFrame(rows)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp"]).copy()
+    df["status"] = df["status"].astype(int)
+    return df
 
-df = pd.DataFrame(data)
-df['timestamp'] = pd.to_datetime(df['timestamp'], format='%d/%b/%Y:%H:%M:%S %z')
-df['status'] = df['status'].astype(int)
 
-print(f"Parsed {len(df)} log entries")
+def build_series(df: pd.DataFrame) -> pd.DataFrame:
+    ts = (
+        df.set_index("timestamp")
+        .resample("1min")
+        .agg(
+            requests=("ip", "count"),
+            unique_ips=("ip", "nunique"),
+            error_rate=("status", lambda s: (s >= 400).mean()),
+        )
+    )
+    return ts.fillna(0)
 
-# Create time series
-print("\nCreating time series...")
-df_sorted = df.sort_values('timestamp').set_index('timestamp')
-ts = df_sorted.resample('1min').agg({'ip': 'count', 'status': lambda x: (x == 200).sum()})
-ts.columns = ['total_requests', 'successful_requests']
-ts['unique_ips'] = df_sorted.groupby(pd.Grouper(freq='1min'))['ip'].nunique()
-ts = ts.fillna(0)
 
-print(f"Mean requests/min: {ts['total_requests'].mean():.2f}")
-print(f"Max requests/min: {ts['total_requests'].max():.0f}")
+def detect_intervals(ts: pd.DataFrame) -> tuple[pd.DataFrame, list[dict[str, object]], float]:
+    y = ts["requests"].to_numpy(dtype=float)
+    x = np.arange(len(ts)).reshape(-1, 1)
 
-# Regression analysis
-print("\nPerforming regression analysis...")
-X = np.arange(len(ts)).reshape(-1, 1)
-y = ts['total_requests'].values
+    poly = PolynomialFeatures(degree=3, include_bias=True)
+    x_poly = poly.fit_transform(x)
 
-poly = PolynomialFeatures(degree=3)
-X_poly = poly.fit_transform(X)
-model = LinearRegression()
-model.fit(X_poly, y)
-y_pred = model.predict(X_poly)
+    model_initial = LinearRegression().fit(x_poly, y)
+    pred_initial = model_initial.predict(x_poly)
+    residual_initial = y - pred_initial
 
-residuals = y - y_pred
-residual_std = np.std(residuals)
-anomaly_threshold = 3 * residual_std
+    keep_mask = ~((y > np.quantile(y, 0.95)) & (residual_initial > 0))
+    model = LinearRegression().fit(x_poly[keep_mask], y[keep_mask])
 
-ts['predicted'] = y_pred
-ts['residual'] = residuals
-ts['is_anomaly'] = np.abs(residuals) > anomaly_threshold
+    predicted = model.predict(x_poly)
+    residual = y - predicted
+    sigma = np.std(residual[keep_mask])
 
-overall_mean = ts['total_requests'].mean()
-overall_std = ts['total_requests'].std()
-ts['is_high_traffic'] = ts['total_requests'] > (overall_mean + 2 * overall_std)
-ts['attack_period'] = (ts['is_anomaly'] & ts['is_high_traffic']).astype(int)
+    is_attack = (residual > 3 * sigma) & (y > 1.8 * predicted)
 
-print(f"Residual std: {residual_std:.2f}")
-print(f"Anomaly threshold: {anomaly_threshold:.2f}")
+    out = ts.copy()
+    out["predicted"] = predicted
+    out["residual"] = residual
+    out["is_attack"] = is_attack
 
-# Identify attack windows
-print("\nIdentifying attack windows...")
-attacks = []
-in_attack = False
-start_idx = None
+    intervals: list[dict[str, object]] = []
+    start_idx: int | None = None
 
-for idx, row in ts.iterrows():
-    if row['attack_period'] == 1 and not in_attack:
-        start_idx = idx
-        in_attack = True
-    elif row['attack_period'] == 0 and in_attack:
-        duration = (idx - start_idx).seconds / 60
-        if duration >= 5:
-            attacks.append({
-                'start': start_idx,
-                'end': idx,
-                'duration_min': duration,
-                'peak_requests': ts.loc[start_idx:idx, 'total_requests'].max(),
-                'total_requests': ts.loc[start_idx:idx, 'total_requests'].sum()
-            })
-        in_attack = False
+    for i, flag in enumerate(is_attack):
+        if flag and start_idx is None:
+            start_idx = i
+        elif (not flag) and start_idx is not None:
+            end_idx = i - 1
+            segment = out.iloc[start_idx : end_idx + 1]
+            intervals.append(
+                {
+                    "start_utc": segment.index[0],
+                    "end_utc": segment.index[-1],
+                    "duration_min": len(segment),
+                    "peak_requests": int(segment["requests"].max()),
+                    "total_requests": int(segment["requests"].sum()),
+                    "peak_unique_ips": int(segment["unique_ips"].max()),
+                }
+            )
+            start_idx = None
 
-print(f"\nDetected {len(attacks)} attack windows:")
-for i, attack in enumerate(attacks, 1):
-    print(f"\nAttack {i}:")
-    print(f"  Start: {attack['start']}")
-    print(f"  End: {attack['end']}")
-    print(f"  Duration: {attack['duration_min']:.1f} minutes")
-    print(f"  Peak: {attack['peak_requests']:.0f} req/min")
+    if start_idx is not None:
+        segment = out.iloc[start_idx:]
+        intervals.append(
+            {
+                "start_utc": segment.index[0],
+                "end_utc": segment.index[-1],
+                "duration_min": len(segment),
+                "peak_requests": int(segment["requests"].max()),
+                "total_requests": int(segment["requests"].sum()),
+                "peak_unique_ips": int(segment["unique_ips"].max()),
+            }
+        )
 
-# Visualization
-print("\nCreating visualizations...")
-fig, axes = plt.subplots(3, 1, figsize=(14, 10))
+    return out, intervals, sigma
 
-time_minutes = np.arange(len(ts))
-ax1 = axes[0]
-ax1.plot(time_minutes, ts['total_requests'], label='Actual', linewidth=1.5, alpha=0.7)
-ax1.plot(time_minutes, ts['predicted'], label='Regression', linewidth=2, linestyle='--', color='red')
 
-for attack in attacks:
-    start_min = (attack['start'] - ts.index[0]).seconds / 60
-    end_min = (attack['end'] - ts.index[0]).seconds / 60
-    ax1.axvspan(start_min, end_min, alpha=0.3, color='red')
+def save_plot(ts: pd.DataFrame, intervals: list[dict[str, object]], sigma: float) -> None:
+    fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
+    x = np.arange(len(ts))
 
-ax1.set_xlabel('Time (minutes from midnight)', fontweight='bold')
-ax1.set_ylabel('Requests per Minute', fontweight='bold')
-ax1.set_title('DDoS Attack Detection via Polynomial Regression', fontweight='bold')
-ax1.legend()
-ax1.grid(True, alpha=0.3)
+    axes[0].plot(x, ts["requests"], label="Actual requests/min", linewidth=1.8)
+    axes[0].plot(x, ts["predicted"], label="Regression baseline", linestyle="--", linewidth=2)
+    axes[0].set_ylabel("Requests/min")
+    axes[0].set_title("DDoS Detection using Regression Analysis")
+    axes[0].grid(alpha=0.3)
+    axes[0].legend()
 
-ax2 = axes[1]
-ax2.scatter(time_minutes, ts['residual'], alpha=0.5, s=20)
-ax2.axhline(y=0, color='black', linestyle='-')
-ax2.axhline(y=3*residual_std, color='red', linestyle='--', label='±3σ')
-ax2.axhline(y=-3*residual_std, color='red', linestyle='--')
-ax2.set_xlabel('Time (minutes)', fontweight='bold')
-ax2.set_ylabel('Residual', fontweight='bold')
-ax2.set_title('Regression Residuals - Anomaly Detection', fontweight='bold')
-ax2.legend()
-ax2.grid(True, alpha=0.3)
+    axes[1].plot(x, ts["residual"], color="tab:orange", linewidth=1.5, label="Residual")
+    axes[1].axhline(3 * sigma, color="red", linestyle="--", label="+3σ threshold")
+    axes[1].axhline(0, color="black", linewidth=1)
+    axes[1].set_ylabel("Residual")
+    axes[1].grid(alpha=0.3)
+    axes[1].legend()
 
-ax3 = axes[2]
-ax3.plot(time_minutes, ts['unique_ips'], linewidth=1.5, color='green')
-for attack in attacks:
-    start_min = (attack['start'] - ts.index[0]).seconds / 60
-    end_min = (attack['end'] - ts.index[0]).seconds / 60
-    ax3.axvspan(start_min, end_min, alpha=0.3, color='red')
-ax3.set_xlabel('Time (minutes)', fontweight='bold')
-ax3.set_ylabel('Unique IPs per Minute', fontweight='bold')
-ax3.set_title('Distributed Attack Indicator', fontweight='bold')
-ax3.grid(True, alpha=0.3)
+    axes[2].plot(x, ts["unique_ips"], color="tab:green", linewidth=1.5, label="Unique IPs/min")
+    axes[2].set_ylabel("Unique IPs/min")
+    axes[2].set_xlabel("Minute index")
+    axes[2].grid(alpha=0.3)
+    axes[2].legend()
 
-plt.tight_layout()
-plt.savefig('ddos_analysis.png', dpi=300, bbox_inches='tight')
-print("Saved: ddos_analysis.png")
+    for interval in intervals:
+        start = ts.index.get_loc(interval["start_utc"])
+        end = ts.index.get_loc(interval["end_utc"])
+        for ax in axes:
+            ax.axvspan(start, end, color="red", alpha=0.22)
 
-print("\n" + "="*60)
-print("ANALYSIS COMPLETE")
-print("="*60)
+    plt.tight_layout()
+    plt.savefig("ddos_analysis.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("Saved visualization: ddos_analysis.png")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Regression-based DDoS interval detection")
+    parser.add_argument("--force-download", action="store_true", help="Re-download official dataset")
+    args = parser.parse_args()
+
+    path = ensure_log_file(force_download=args.force_download)
+    df = parse_log(path)
+    ts = build_series(df)
+    ts, intervals, sigma = detect_intervals(ts)
+
+    print("\n===== DATA SUMMARY =====")
+    print(f"Parsed rows: {len(df)}")
+    print(f"Time span: {ts.index.min()} -> {ts.index.max()}")
+    print(f"Mean requests/min: {ts['requests'].mean():.2f}")
+    print(f"Max requests/min: {int(ts['requests'].max())}")
+    print(f"Residual baseline sigma: {sigma:.2f}")
+
+    print("\n===== DETECTED DDoS INTERVAL(S) =====")
+    if not intervals:
+        print("No attack interval detected with current thresholds.")
+    else:
+        for i, interval in enumerate(intervals, 1):
+            s = interval["start_utc"]
+            e = interval["end_utc"]
+            print(f"Attack #{i}")
+            print(f"  UTC:   {s} -> {e}")
+            print(f"  +04:00 {s.tz_convert('Etc/GMT-4')} -> {e.tz_convert('Etc/GMT-4')}")
+            print(f"  Duration (minutes): {interval['duration_min']}")
+            print(f"  Peak requests/min:  {interval['peak_requests']}")
+            print(f"  Total requests:     {interval['total_requests']}")
+            print(f"  Peak unique IPs:    {interval['peak_unique_ips']}")
+
+    save_plot(ts, intervals, sigma)
+    print("\nAnalysis complete.")
+
+
+if __name__ == "__main__":
+    main()
